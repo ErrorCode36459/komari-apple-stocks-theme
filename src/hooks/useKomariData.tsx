@@ -121,6 +121,7 @@ const geoNameAlias: Record<string, string> = {
 
   RU: 'Russia',
   VN: 'Vietnam',
+  TR: 'Turkey',
   IR: 'Iran',
   SY: 'Syria',
   LA: 'Laos',
@@ -129,24 +130,6 @@ const geoNameAlias: Record<string, string> = {
   TZ: 'Tanzania',
   MD: 'Moldova',
   BN: 'Brunei',
-}
-
-function getGeoMapName(countryCode: string) {
-  const code = countryCode.toUpperCase()
-
-  if (geoNameAlias[code]) {
-    return geoNameAlias[code]
-  }
-
-  try {
-    const displayNames = new Intl.DisplayNames(['en'], {
-      type: 'region',
-    })
-
-    return displayNames.of(code) ?? code
-  } catch {
-    return code
-  }
 }
 
 const emojiFallbackMap: Record<string, string> = {
@@ -165,6 +148,24 @@ const emojiFallbackMap: Record<string, string> = {
   '🇳🇱': 'NL',
   '🇨🇦': 'CA',
   '🇰🇷': 'KR',
+}
+
+function getGeoMapName(countryCode: string) {
+  const code = countryCode.toUpperCase()
+
+  if (geoNameAlias[code]) {
+    return geoNameAlias[code]
+  }
+
+  try {
+    const displayNames = new Intl.DisplayNames(['en'], {
+      type: 'region',
+    })
+
+    return displayNames.of(code) ?? code
+  } catch {
+    return code
+  }
 }
 
 function roundNumber(value: unknown, digits = 2) {
@@ -264,11 +265,25 @@ function getCpuPercent(status?: RawLatestStatus) {
   return roundPercent(status?.cpu ?? 0, 2)
 }
 
-function getTraffic24h(status?: RawLatestStatus) {
+function getTrafficUsedBytes(status?: RawLatestStatus) {
   const up = Number(status?.net_total_out ?? status?.net_total_up ?? 0)
   const down = Number(status?.net_total_in ?? status?.net_total_down ?? 0)
 
-  return formatBytes(up + down)
+  return up + down
+}
+
+function getTraffic24h(status?: RawLatestStatus) {
+  return formatBytes(getTrafficUsedBytes(status))
+}
+
+function getTrafficLimitBytes(raw: RawKomariNode) {
+  const limit = Number(raw.traffic_limit ?? 0)
+
+  if (!Number.isFinite(limit) || limit <= 0) {
+    return 0
+  }
+
+  return limit
 }
 
 function getPublicRemark(raw: RawKomariNode) {
@@ -355,6 +370,9 @@ function normalizeNode(
   const totalUpload = formatBytes(status?.net_total_out ?? status?.net_total_up ?? 0)
   const totalDownload = formatBytes(status?.net_total_in ?? status?.net_total_down ?? 0)
 
+  const trafficUsedBytes = getTrafficUsedBytes(status)
+  const trafficLimitBytes = getTrafficLimitBytes(raw)
+
   return {
     id: raw.uuid,
     name: raw.name,
@@ -368,7 +386,11 @@ function normalizeNode(
 
     ping: 0,
     uptime: formatThirtyDayUptimePercent(status),
+
     traffic24h: getTraffic24h(status),
+    trafficUsed: formatBytes(trafficUsedBytes),
+    trafficLimit: trafficLimitBytes > 0 ? formatBytes(trafficLimitBytes) : '',
+    trafficLimitBytes,
 
     uploadSpeed,
     downloadSpeed,
@@ -474,6 +496,7 @@ function useKomariDataValue(): UseKomariDataResult {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [refreshIndex, setRefreshIndex] = useState(0)
+  const [timeTick, setTimeTick] = useState(0)
 
   const refresh = useCallback(() => {
     setRefreshIndex((value) => value + 1)
@@ -489,7 +512,9 @@ function useKomariDataValue(): UseKomariDataResult {
       try {
         const list = await fetchNodes()
 
-        if (!cancelled) setRawNodes(list)
+        if (!cancelled) {
+          setRawNodes(list)
+        }
       } catch (currentError) {
         if (!cancelled) {
           setRawNodes(null)
@@ -500,7 +525,9 @@ function useKomariDataValue(): UseKomariDataResult {
           )
         }
       } finally {
-        if (!cancelled) setLoading(false)
+        if (!cancelled) {
+          setLoading(false)
+        }
       }
     }
 
@@ -552,9 +579,22 @@ function useKomariDataValue(): UseKomariDataResult {
 
     return () => {
       cancelled = true
-      if (timer) window.clearTimeout(timer)
+
+      if (timer) {
+        window.clearTimeout(timer)
+      }
     }
   }, [refreshIndex, rawNodes])
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setTimeTick((value) => value + 1)
+    }, 1000)
+
+    return () => {
+      window.clearInterval(timer)
+    }
+  }, [])
 
   const realNodes = useMemo(() => {
     if (!rawNodes || rawNodes.length === 0) return null
@@ -610,7 +650,7 @@ function useKomariDataValue(): UseKomariDataResult {
       partialNodes,
       offlineNodes,
     }
-  }, [nodes, latestMap])
+  }, [nodes, latestMap, timeTick])
 
   return {
     nodes,

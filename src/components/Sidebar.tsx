@@ -74,28 +74,57 @@ function getRemainingDays(expiredAt?: string) {
   return Math.ceil((end - Date.now()) / 86400000)
 }
 
-function getBillingText(node: NodeItem) {
+function getSidebarText(lang: string) {
+  if (lang === 'en') {
+    return {
+      free: 'Free',
+      day: 'd',
+      daysLeft: 'left',
+    }
+  }
+
+  if (lang === 'zh-TW') {
+    return {
+      free: '免費',
+      day: '天',
+      daysLeft: '餘',
+    }
+  }
+
+  return {
+    free: '免费',
+    day: '天',
+    daysLeft: '余',
+  }
+}
+
+function getBillingText(node: NodeItem, lang: string) {
   const billing = node.billing
+  const text = getSidebarText(lang)
 
   if (!billing) return ''
 
   if (billing.price === 0) return ''
 
   if (billing.price === -1) {
-    return '免费'
+    return text.free
   }
 
   if (billing.price < -1) return ''
 
   const price = `${billing.currency || ''}${billing.price}`
-  const cycle = billing.billingCycle > 0 ? `/${billing.billingCycle}天` : ''
+  const cycle = billing.billingCycle > 0 ? `/${billing.billingCycle}${text.day}` : ''
   const remain = getRemainingDays(billing.expiredAt)
 
   if (remain === null) {
     return `${price}${cycle}`
   }
 
-  return `${price}${cycle} · 余${remain}天`
+  if (lang === 'en') {
+    return `${price}${cycle} · ${remain}${text.day} ${text.daysLeft}`
+  }
+
+  return `${price}${cycle} · ${text.daysLeft}${remain}${text.day}`
 }
 
 function splitTags(tags?: string) {
@@ -107,9 +136,9 @@ function splitTags(tags?: string) {
     .filter(Boolean)
 }
 
-function MetaBadges({ node }: { node: NodeItem }) {
+function MetaBadges({ node, lang }: { node: NodeItem; lang: string }) {
   const tags = splitTags(node.tags)
-  const billingText = getBillingText(node)
+  const billingText = getBillingText(node, lang)
 
   const badges = [
     ...tags.map((tag) => ({
@@ -292,7 +321,7 @@ export function Sidebar({
                       </div>
                     </div>
 
-                    <MetaBadges node={node} />
+                    <MetaBadges node={node} lang={lang} />
                   </button>
                 )
               })}

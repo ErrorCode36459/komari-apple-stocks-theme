@@ -1,11 +1,12 @@
 import {
   Activity,
   Cpu,
-  Database,
   HardDrive,
   MemoryStick,
-  RadioTower,
+  Radio,
+  Server,
 } from 'lucide-react'
+import type { ReactNode } from 'react'
 import type { NodeItem } from '../data/mock'
 import { useI18n } from '../i18n/I18nContext'
 
@@ -19,93 +20,159 @@ function MetricCard({
   label: string
   value: string
   sub: string
-  icon: React.ReactNode
+  icon: ReactNode
   danger?: boolean
 }) {
   return (
-    <div className="rounded-2xl border border-white/[0.08] bg-white/[0.045] p-5 shadow-xl shadow-black/20 backdrop-blur-xl">
-      <div className="mb-4 flex items-center justify-between gap-3">
-        <p className="text-sm text-zinc-400">{label}</p>
+    <div className="min-w-0 rounded-2xl border border-white/[0.08] bg-white/[0.045] p-5 shadow-xl shadow-black/20 backdrop-blur-xl">
+      <div className="mb-4 flex min-w-0 items-start justify-between gap-3">
+        <p className="min-w-0 truncate text-sm text-zinc-400">
+          {label}
+        </p>
+
         <div className={danger ? 'text-orange-400' : 'text-emerald-400'}>
           {icon}
         </div>
       </div>
 
-      <p className="break-words text-3xl font-semibold tracking-tight text-zinc-100">
+      <p className="min-w-0 break-words text-3xl font-semibold tracking-tight text-zinc-100">
         {value}
       </p>
 
-      <p
-        className={[
-          'mt-2 text-sm',
-          danger ? 'text-orange-300' : 'text-emerald-300',
-        ].join(' ')}
-      >
-        {sub}
-      </p>
+      {sub && (
+        <p
+          className={[
+            'mt-3 text-sm',
+            danger ? 'text-orange-300' : 'text-emerald-300',
+          ].join(' ')}
+        >
+          {sub}
+        </p>
+      )}
     </div>
   )
 }
 
-function formatShortRunningTime(text: string) {
-  const dayMatch = text.match(/(\d+)\s*天/)
-  const hourMatch = text.match(/(\d+)\s*时/)
+function getMetricText(lang: string) {
+  if (lang === 'en') {
+    return {
+      runningTime: 'Running Time',
+      uptime: 'Uptime',
+      trafficUsage: 'Traffic Usage',
+      cpu: 'CPU',
+      memory: 'Memory',
+      disk: 'Disk',
+      online: 'Online',
+      offline: 'Offline',
+      recent30Days: 'Last 30 days',
+    }
+  }
 
-  const days = dayMatch?.[1] ?? '0'
-  const hours = hourMatch?.[1] ?? '0'
+  if (lang === 'zh-TW') {
+    return {
+      runningTime: '運行時間',
+      uptime: '在線率',
+      trafficUsage: '流量使用情況',
+      cpu: 'CPU',
+      memory: '記憶體',
+      disk: '磁碟',
+      online: '在線',
+      offline: '離線',
+      recent30Days: '近 30 天',
+    }
+  }
 
-  return `${days}天 ${hours}时`
+  return {
+    runningTime: '运行时间',
+    uptime: '在线率',
+    trafficUsage: '流量使用情况',
+    cpu: 'CPU',
+    memory: '内存',
+    disk: '磁盘',
+    online: '在线',
+    offline: '离线',
+    recent30Days: '近 30 天',
+  }
+}
+
+function localizeDuration(value: string, lang: string) {
+  if (lang === 'en') {
+    return value
+      .replace(/天/g, 'd')
+      .replace(/时/g, 'h')
+      .replace(/分/g, 'm')
+  }
+
+  if (lang === 'zh-TW') {
+    return value
+      .replace(/天/g, '天')
+      .replace(/时/g, '時')
+      .replace(/分/g, '分')
+  }
+
+  return value
+}
+
+function getTrafficText(node: NodeItem) {
+  const used = node.trafficUsed || node.traffic24h || '--'
+  const limit = node.trafficLimit || ''
+  const limitBytes = node.trafficLimitBytes ?? 0
+
+  if (limitBytes > 0 && limit) {
+    return `${used} / ${limit}`
+  }
+
+  return used
 }
 
 export function NodeMetricGrid({ node }: { node: NodeItem }) {
-  const { t } = useI18n()
+  const { lang } = useI18n()
+  const text = getMetricText(lang)
 
   return (
-    <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+    <div className="grid grid-cols-1 gap-4 md:grid-cols-2 2xl:grid-cols-3">
       <MetricCard
-        label={t.runningTime}
-        value={formatShortRunningTime(node.system.runningTime)}
-        sub={node.status === 'online' ? t.online : node.status === 'partial' ? t.abnormal : t.offline}
-        icon={<RadioTower className="h-5 w-5" />}
+        label={text.runningTime}
+        value={localizeDuration(node.system.runningTime, lang)}
+        sub={node.status === 'online' ? text.online : text.offline}
+        icon={<Radio className="h-5 w-5" />}
         danger={node.status !== 'online'}
       />
 
       <MetricCard
-        label={t.uptime}
+        label={text.uptime}
         value={node.uptime}
-        sub="↑ 0.02%"
+        sub={text.recent30Days}
         icon={<Activity className="h-5 w-5" />}
       />
 
       <MetricCard
-        label={t.traffic24h}
-        value={node.traffic24h}
-        sub="↑ 8.4%"
-        icon={<Database className="h-5 w-5" />}
+        label={text.trafficUsage}
+        value={getTrafficText(node)}
+        sub=""
+        icon={<Server className="h-5 w-5" />}
       />
 
       <MetricCard
-        label={t.cpu}
-        value={`${node.cpu}%`}
-        sub={node.change > 0 ? `↑ ${node.change}%` : `↓ ${Math.abs(node.change)}%`}
+        label={text.cpu}
+        value={`${node.cpu.toFixed(2)}%`}
+        sub=""
         icon={<Cpu className="h-5 w-5" />}
-        danger={node.cpu >= 55}
       />
 
       <MetricCard
-        label={t.memory}
-        value={`${node.memory}%`}
-        sub="↓ 5%"
+        label={text.memory}
+        value={`${node.memory.toFixed(2)}%`}
+        sub=""
         icon={<MemoryStick className="h-5 w-5" />}
-        danger={node.memory >= 70}
       />
 
       <MetricCard
-        label={t.disk}
-        value={`${node.disk}%`}
-        sub="↑ 2%"
+        label={text.disk}
+        value={`${node.disk.toFixed(2)}%`}
+        sub=""
         icon={<HardDrive className="h-5 w-5" />}
-        danger={node.disk >= 70}
+        danger={node.disk >= 80}
       />
     </div>
   )

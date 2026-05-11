@@ -42,6 +42,9 @@ export type NodeItem = {
 
   uptime: string
   traffic24h: string
+  trafficUsed?: string
+  trafficLimit?: string
+  trafficLimitBytes?: number
   uploadSpeed: string
   downloadSpeed: string
   totalUpload: string
