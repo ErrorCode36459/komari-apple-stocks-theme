@@ -2,8 +2,6 @@
 
 一个受 Apple「股市」App 启发设计的 Komari 第三方主题，采用深色玻璃拟态界面，包含服务器总览、节点详情、世界地图、负载图表、延迟监控、语言切换和移动端自适应布局。
 
-![Preview](./preview.png)
-
 ## 功能特性
 
 - Apple Stocks 风格深色 UI
@@ -23,6 +21,7 @@
 
 ## 预览
 
+![Preview](./preview-world.png)
 ![Preview](./preview.png)
 
 ## 安装使用
