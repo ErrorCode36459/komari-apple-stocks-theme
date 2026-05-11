@@ -1,73 +1,35 @@
-# React + TypeScript + Vite
+# Komari Apple Stocks Theme
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+一个受 Apple「股市」App 启发设计的 Komari 第三方主题，采用深色玻璃拟态界面，包含服务器总览、节点详情、世界地图、负载图表、延迟监控、语言切换和移动端自适应布局。
 
-Currently, two official plugins are available:
+![Preview](./preview.png)
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## 功能特性
 
-## React Compiler
+- Apple Stocks 风格深色 UI
+- 服务器总览页面
+- 世界地图节点分布显示
+- 节点详情页面
+- CPU、内存、磁盘、网络等实时状态展示
+- 负载历史图表
+- 延迟监控图表
+- 观察列表 CPU 小折线图
+- 支持在线 / 离线状态显示
+- 支持标签、分组、公开备注、账单信息展示
+- 支持简体中文、繁体中文、英文切换
+- 支持明暗模式切换
+- 支持移动端 / 窄屏自适应布局
+- 支持 Komari 主题管理上传使用
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## 预览
 
-## Expanding the ESLint configuration
+![Preview](./preview.png)
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+## 安装使用
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
-
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
-
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+1. 前往本仓库的 Releases 页面
+2. 下载最新版本的 `komari-apple-stocks-theme.zip`
+3. 进入 Komari 后台
+4. 打开「主题管理」
+5. 上传该 `.zip` 文件
+6. 启用主题
