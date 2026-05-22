@@ -1,8 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import {
-  Area,
-  AreaChart,
-  CartesianGrid,
   Line,
   LineChart,
   ResponsiveContainer,
@@ -14,24 +11,10 @@ import type { NodeItem, NodeMetricSample } from '../data/mock'
 import { useI18n } from '../i18n/I18nContext'
 import { formatBytes, formatSpeed } from '../utils/format'
 
-type LoadRange = 'live' | '4h' | '1d' | '7d' | '30d'
-
-type RawLoadRecord = {
-  time: string
-  cpu?: number
-  ram?: number
-  swap?: number
-  disk?: number
-  net_in?: number
-  net_out?: number
-  connections?: number
-  connections_udp?: number
-  process?: number
-}
+type RangeKey = 'realtime' | '4h' | '1d' | '7d' | '30d'
 
 type ChartPoint = {
   timestamp: number
-  label: string
   cpu: number
   memory: number
   disk: number
@@ -42,67 +25,82 @@ type ChartPoint = {
   processes: number
 }
 
-const rangeHours: Record<Exclude<LoadRange, 'live'>, number> = {
+type LoadMetricsPanelProps = {
+  node: NodeItem
+}
+
+const RANGE_HOURS: Record<RangeKey, number> = {
+  realtime: 0,
   '4h': 4,
   '1d': 24,
-  '7d': 168,
-  '30d': 720,
+  '7d': 24 * 7,
+  '30d': 24 * 30,
 }
 
-const remoteCache: Record<string, ChartPoint[]> = {}
-
-function parseBytesText(value?: string) {
-  if (!value) return 0
-
-  const match = value.trim().match(/^([\d.]+)\s*([KMGTPE]?B)$/i)
-
-  if (!match) return 0
-
-  const number = Number(match[1])
-  const unit = match[2].toUpperCase()
-
-  if (!Number.isFinite(number)) return 0
-
-  const units: Record<string, number> = {
-    B: 1,
-    KB: 1024,
-    MB: 1024 ** 2,
-    GB: 1024 ** 3,
-    TB: 1024 ** 4,
-    PB: 1024 ** 5,
-    EB: 1024 ** 6,
+function getText(lang: string) {
+  if (lang === 'en') {
+    return {
+      realtime: 'Realtime',
+      fourHours: '4 hours',
+      oneDay: '1 day',
+      sevenDays: '7 days',
+      thirtyDays: '30 days',
+      cpu: 'CPU',
+      ram: 'Ram',
+      disk: 'Disk',
+      network: 'Network',
+      connections: 'Connections',
+      processes: 'Processes',
+      tcp: 'TCP',
+      udp: 'UDP',
+      upload: 'Upload',
+      download: 'Download',
+      noData: 'No data',
+    }
   }
 
-  return number * (units[unit] ?? 1)
-}
-
-function clampPercent(value: unknown) {
-  const number = Number(value)
-
-  if (!Number.isFinite(number)) return 0
-
-  return Math.max(0, Math.min(100, Number(number.toFixed(2))))
-}
-
-function normalizePercent(value: unknown, totalBytes: number) {
-  const number = Number(value)
-
-  if (!Number.isFinite(number) || number <= 0) return 0
-
-  // 如果后端返回的本身就是百分比
-  if (number <= 100) {
-    return clampPercent(number)
+  if (lang === 'zh-TW') {
+    return {
+      realtime: '即時',
+      fourHours: '4 小時',
+      oneDay: '1 天',
+      sevenDays: '7 天',
+      thirtyDays: '30 天',
+      cpu: 'CPU',
+      ram: 'Ram',
+      disk: 'Disk',
+      network: '網路',
+      connections: '連接數',
+      processes: '進程數',
+      tcp: 'TCP',
+      udp: 'UDP',
+      upload: '上行',
+      download: '下行',
+      noData: '無',
+    }
   }
 
-  // 如果后端返回的是已用字节数
-  if (totalBytes > 0) {
-    return clampPercent((number / totalBytes) * 100)
+  return {
+    realtime: '实时',
+    fourHours: '4 小时',
+    oneDay: '1 天',
+    sevenDays: '7 天',
+    thirtyDays: '30 天',
+    cpu: 'CPU',
+    ram: 'Ram',
+    disk: 'Disk',
+    network: '网络',
+    connections: '连接数',
+    processes: '进程数',
+    tcp: 'TCP',
+    udp: 'UDP',
+    upload: '上行',
+    download: '下行',
+    noData: '无',
   }
-
-  return 0
 }
 
-function formatTimeLabel(timestamp: number, range: LoadRange) {
+function formatTime(timestamp: number, range: RangeKey) {
   const date = new Date(timestamp)
 
   if (range === '7d' || range === '30d') {
@@ -115,268 +113,296 @@ function formatTimeLabel(timestamp: number, range: LoadRange) {
   return date.toLocaleTimeString([], {
     hour: '2-digit',
     minute: '2-digit',
+    second: range === 'realtime' ? '2-digit' : undefined,
   })
 }
 
-function normalizeRemoteRecords(
-  records: RawLoadRecord[],
-  node: NodeItem,
-  range: LoadRange,
-): ChartPoint[] {
-  const memoryTotal = parseBytesText(node.system.memory)
-  const diskTotal = parseBytesText(node.system.disk)
-
-  return records
-    .map((record) => {
-      const timestamp = new Date(record.time).getTime()
-
-      if (!Number.isFinite(timestamp)) {
-        return null
-      }
-
-      return {
-        timestamp,
-        label: formatTimeLabel(timestamp, range),
-        cpu: clampPercent(record.cpu ?? 0),
-        memory: normalizePercent(record.ram ?? 0, memoryTotal),
-        disk: normalizePercent(record.disk ?? 0, diskTotal),
-        uploadSpeed: Number(record.net_out ?? 0),
-        downloadSpeed: Number(record.net_in ?? 0),
-        connections: Number(record.connections ?? 0),
-        udpConnections: Number(record.connections_udp ?? 0),
-        processes: Number(record.process ?? 0),
-      }
-    })
-    .filter((item): item is ChartPoint => Boolean(item))
-    .sort((a, b) => a.timestamp - b.timestamp)
-}
-
-function normalizeLiveHistory(
-  history: NodeMetricSample[] | undefined,
-  node: NodeItem,
-): ChartPoint[] {
-  const source =
-    history && history.length > 0
-      ? history
-      : [
-          {
-            timestamp: Date.now(),
-            time: '',
-            cpu: node.cpu,
-            memory: node.memory,
-            disk: node.disk,
-            uploadSpeed: 0,
-            downloadSpeed: 0,
-            totalUpload: 0,
-            totalDownload: 0,
-            connections: 0,
-            udpConnections: 0,
-            processes: 0,
-          },
-        ]
-
-  return source.slice(-160).map((item) => ({
-    timestamp: item.timestamp,
-    label: formatTimeLabel(item.timestamp, 'live'),
-    cpu: item.cpu,
-    memory: item.memory,
-    disk: item.disk,
-    uploadSpeed: item.uploadSpeed,
-    downloadSpeed: item.downloadSpeed,
-    connections: item.connections,
-    udpConnections: item.udpConnections,
-    processes: item.processes,
-  }))
-}
-
-function downsampleData(data: ChartPoint[], maxPoints = 240) {
-  if (data.length <= maxPoints) return data
-
-  const step = Math.ceil(data.length / maxPoints)
-
-  return data.filter((_, index) => index % step === 0)
-}
-
-async function fetchLoadRecords(nodeId: string, range: Exclude<LoadRange, 'live'>) {
-  const hours = rangeHours[range]
-  const response = await fetch(
-    `/api/records/load?uuid=${encodeURIComponent(nodeId)}&hours=${hours}`,
-    {
-      credentials: 'include',
-    },
-  )
-
-  if (!response.ok) {
-    throw new Error(`/api/records/load HTTP ${response.status}`)
+function toTimestamp(value: unknown) {
+  if (typeof value === 'number') {
+    if (value < 10_000_000_000) return value * 1000
+    return value
   }
 
-  const json = await response.json()
+  if (typeof value === 'string') {
+    const number = Number(value)
 
-  const records = Array.isArray(json?.data?.records)
-    ? json.data.records
-    : Array.isArray(json?.records)
-      ? json.records
-      : []
+    if (Number.isFinite(number)) {
+      if (number < 10_000_000_000) return number * 1000
+      return number
+    }
 
-  return records as RawLoadRecord[]
+    const parsed = new Date(value).getTime()
+
+    if (Number.isFinite(parsed)) return parsed
+  }
+
+  return Date.now()
 }
 
-function MetricCard({
+function safeNumber(value: unknown) {
+  const number = Number(value)
+
+  if (!Number.isFinite(number)) return 0
+
+  return number
+}
+
+function normalizeHistorySample(item: NodeMetricSample): ChartPoint {
+  return {
+    timestamp: item.timestamp,
+    cpu: safeNumber(item.cpu),
+    memory: safeNumber(item.memory),
+    disk: safeNumber(item.disk),
+    uploadSpeed: safeNumber(item.uploadSpeed),
+    downloadSpeed: safeNumber(item.downloadSpeed),
+    connections: safeNumber(item.connections),
+    udpConnections: safeNumber(item.udpConnections),
+    processes: safeNumber(item.processes),
+  }
+}
+
+function normalizeApiRecord(raw: any): ChartPoint {
+  return {
+    timestamp: toTimestamp(
+      raw.timestamp ??
+        raw.time ??
+        raw.created_at ??
+        raw.createdAt ??
+        raw.report_at ??
+        raw.reportAt,
+    ),
+    cpu: safeNumber(raw.cpu ?? raw.cpu_usage ?? raw.cpuUsage),
+    memory: safeNumber(raw.memory ?? raw.mem ?? raw.ram ?? raw.ram_usage ?? raw.ramUsage),
+    disk: safeNumber(raw.disk ?? raw.disk_usage ?? raw.diskUsage),
+    uploadSpeed: safeNumber(raw.uploadSpeed ?? raw.net_out ?? raw.netOut ?? raw.up),
+    downloadSpeed: safeNumber(raw.downloadSpeed ?? raw.net_in ?? raw.netIn ?? raw.down),
+    connections: safeNumber(raw.connections ?? raw.tcp ?? raw.tcp_connections),
+    udpConnections: safeNumber(raw.udpConnections ?? raw.connections_udp ?? raw.udp),
+    processes: safeNumber(raw.processes ?? raw.process ?? raw.process_count),
+  }
+}
+
+function extractRecords(json: any) {
+  const data = json?.data ?? json?.result ?? json?.records ?? json
+
+  if (Array.isArray(data)) return data
+
+  if (Array.isArray(data?.records)) return data.records
+  if (Array.isArray(data?.list)) return data.list
+  if (Array.isArray(data?.data)) return data.data
+
+  return []
+}
+
+function buildRealtimeData(history?: NodeMetricSample[]) {
+  const source = history ?? []
+
+  return source.slice(-180).map(normalizeHistorySample)
+}
+
+async function fetchHistoricalLoad(nodeId: string, range: RangeKey) {
+  const hours = RANGE_HOURS[range]
+
+  if (!hours) return []
+
+  const urls = [
+    `/api/records/load?uuid=${encodeURIComponent(nodeId)}&hours=${hours}`,
+    `/api/records/load?node_id=${encodeURIComponent(nodeId)}&hours=${hours}`,
+    `/api/records/load?id=${encodeURIComponent(nodeId)}&hours=${hours}`,
+  ]
+
+  for (const url of urls) {
+    try {
+      const response = await fetch(url, {
+        credentials: 'include',
+      })
+
+      if (!response.ok) continue
+
+      const json = await response.json()
+      const records = extractRecords(json).map(normalizeApiRecord)
+
+      if (records.length > 0) {
+        return records.sort((a: ChartPoint, b: ChartPoint) => a.timestamp - b.timestamp)
+      }
+    } catch {
+      // 继续尝试下一个 URL
+    }
+  }
+
+  return []
+}
+
+function averageValue(data: ChartPoint[], key: keyof ChartPoint) {
+  if (data.length === 0) return 0
+
+  const total = data.reduce((sum, item) => sum + safeNumber(item[key]), 0)
+
+  return total / data.length
+}
+
+function latestValue(data: ChartPoint[], key: keyof ChartPoint) {
+  const last = data[data.length - 1]
+
+  if (!last) return 0
+
+  return safeNumber(last[key])
+}
+
+function ChartCard({
   title,
-  summary,
-  secondary,
+  value,
+  subtitle,
+  data,
+  range,
   children,
+  yFormatter,
 }: {
   title: string
-  summary?: string
-  secondary?: string
-  children: React.ReactNode
+  value: ReactNode
+  subtitle?: ReactNode
+  data: ChartPoint[]
+  range: RangeKey
+  children: ReactNode
+  yFormatter?: (value: number) => string
 }) {
   return (
     <div className="min-w-0 rounded-2xl border border-white/[0.08] bg-white/[0.045] p-4 shadow-xl shadow-black/20 backdrop-blur-xl">
-      <div className="mb-3 flex min-w-0 items-start justify-between gap-3">
-        <h3 className="min-w-0 truncate text-[13px] font-medium text-zinc-300 sm:text-base">
-          {title}
-        </h3>
+      <div className="mb-4 flex min-w-0 items-start justify-between gap-4">
+        <div className="min-w-0">
+          <p className="truncate text-lg font-semibold text-zinc-100">
+            {title}
+          </p>
+        </div>
 
-        <div className="shrink-0 text-right">
-          {summary && <p className="text-sm text-zinc-300 sm:text-base">{summary}</p>}
-          {secondary && <p className="mt-1 text-sm text-zinc-500">{secondary}</p>}
+        <div className="shrink-0 text-right text-sm text-zinc-300">
+          {value}
+
+          {subtitle && (
+            <div className="mt-1 text-zinc-500">
+              {subtitle}
+            </div>
+          )}
         </div>
       </div>
 
-      <div className="h-[160px] min-w-0 rounded-xl bg-black/20 p-2">
-        {children}
+      <div className="h-[150px] min-w-0 rounded-xl bg-black/25 p-2">
+        {data.length === 0 ? (
+          <div className="flex h-full items-center justify-center text-sm text-zinc-500">
+            No data
+          </div>
+        ) : (
+          <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
+            <LineChart data={data}>
+              <XAxis
+                dataKey="timestamp"
+                type="number"
+                scale="time"
+                domain={['dataMin', 'dataMax']}
+                axisLine={false}
+                tickLine={false}
+                minTickGap={28}
+                tick={{ fill: '#71717a', fontSize: 11 }}
+                tickFormatter={(value) => formatTime(Number(value), range)}
+              />
+
+              <YAxis
+                axisLine={false}
+                tickLine={false}
+                tick={{ fill: '#71717a', fontSize: 11 }}
+                tickFormatter={(value) =>
+                  yFormatter ? yFormatter(Number(value)) : String(value)
+                }
+              />
+
+              <Tooltip
+                cursor={{
+                  stroke: 'rgba(255,255,255,0.35)',
+                  strokeWidth: 1,
+                }}
+                contentStyle={{
+                  background: 'rgba(24,24,27,0.92)',
+                  border: '1px solid rgba(255,255,255,0.1)',
+                  borderRadius: 16,
+                  color: '#fff',
+                }}
+                labelFormatter={(value) => formatTime(Number(value), range)}
+              />
+
+              {children}
+            </LineChart>
+          </ResponsiveContainer>
+        )}
       </div>
     </div>
   )
 }
 
-function PercentTooltip({ active, payload, label }: any) {
-  if (!active || !payload?.length) return null
+export function LoadMetricsPanel({ node }: LoadMetricsPanelProps) {
+  const { lang } = useI18n()
+  const text = getText(lang)
 
-  return (
-    <div className="rounded-2xl border border-white/[0.08] bg-zinc-950/95 p-3 text-sm shadow-2xl shadow-black/50">
-      <p className="mb-2 font-semibold text-zinc-100">{label}</p>
-      {payload.map((item: any) => (
-        <p key={item.dataKey} style={{ color: item.color }}>
-          {item.name}: {Number(item.value).toFixed(2)}%
-        </p>
-      ))}
-    </div>
-  )
-}
+  const [range, setRange] = useState<RangeKey>('realtime')
+  const [historicalData, setHistoricalData] = useState<ChartPoint[]>([])
 
-function SpeedTooltip({ active, payload, label }: any) {
-  if (!active || !payload?.length) return null
-
-  return (
-    <div className="rounded-2xl border border-white/[0.08] bg-zinc-950/95 p-3 text-sm shadow-2xl shadow-black/50">
-      <p className="mb-2 font-semibold text-zinc-100">{label}</p>
-      {payload.map((item: any) => (
-        <p key={item.dataKey} style={{ color: item.color }}>
-          {item.name}: {formatSpeed(Number(item.value))}
-        </p>
-      ))}
-    </div>
-  )
-}
-
-function CountTooltip({ active, payload, label }: any) {
-  if (!active || !payload?.length) return null
-
-  return (
-    <div className="rounded-2xl border border-white/[0.08] bg-zinc-950/95 p-3 text-sm shadow-2xl shadow-black/50">
-      <p className="mb-2 font-semibold text-zinc-100">{label}</p>
-      {payload.map((item: any) => (
-        <p key={item.dataKey} style={{ color: item.color }}>
-          {item.name}: {Number(item.value).toFixed(0)}
-        </p>
-      ))}
-    </div>
-  )
-}
-
-export function LoadMetricsPanel({ node }: { node: NodeItem }) {
-  const { t } = useI18n()
-  const [range, setRange] = useState<LoadRange>('live')
-  const [remoteData, setRemoteData] = useState<ChartPoint[]>([])
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  const ranges = [
-    { key: 'live' as const, label: t.realtime },
-    { key: '4h' as const, label: t.fourHours },
-    { key: '1d' as const, label: t.oneDay },
-    { key: '7d' as const, label: t.sevenDays },
-    { key: '30d' as const, label: t.thirtyDays },
-  ]
+  const realtimeData = useMemo(() => {
+    return buildRealtimeData(node.history)
+  }, [node.history])
 
   useEffect(() => {
     let cancelled = false
 
-    async function loadRemoteHistory() {
-      if (range === 'live') {
-        setRemoteData([])
-        setLoading(false)
-        setError(null)
+    async function loadHistoricalData() {
+      if (range === 'realtime') {
+        setHistoricalData([])
         return
       }
 
-      const cacheKey = `${node.id}-${range}`
-      const cached = remoteCache[cacheKey]
+      const records = await fetchHistoricalLoad(node.id, range)
 
-      if (cached) {
-        setRemoteData(cached)
-      }
-
-      setLoading(!cached)
-      setError(null)
-
-      try {
-        const records = await fetchLoadRecords(node.id, range)
-        const normalized = downsampleData(normalizeRemoteRecords(records, node, range))
-
-        remoteCache[cacheKey] = normalized
-
-        if (!cancelled) {
-          setRemoteData(normalized)
-        }
-      } catch (currentError) {
-        if (!cancelled) {
-          setError(
-            currentError instanceof Error
-              ? currentError.message
-              : 'Failed to load history',
-          )
-        }
-      } finally {
-        if (!cancelled) {
-          setLoading(false)
-        }
+      if (!cancelled) {
+        setHistoricalData(records)
       }
     }
 
-    loadRemoteHistory()
+    loadHistoricalData()
 
     return () => {
       cancelled = true
     }
-  }, [node, range])
+  }, [node.id, range])
 
-  const data = useMemo(() => {
-    if (range === 'live') {
-      return normalizeLiveHistory(node.history, node)
-    }
+  const data = range === 'realtime' ? realtimeData : historicalData
 
-    return remoteData
-  }, [node, range, remoteData])
-
-  const latest = data[data.length - 1]
+  const ranges: {
+    key: RangeKey
+    label: string
+  }[] = [
+    {
+      key: 'realtime',
+      label: text.realtime,
+    },
+    {
+      key: '4h',
+      label: text.fourHours,
+    },
+    {
+      key: '1d',
+      label: text.oneDay,
+    },
+    {
+      key: '7d',
+      label: text.sevenDays,
+    },
+    {
+      key: '30d',
+      label: text.thirtyDays,
+    },
+  ]
 
   return (
-    <div>
-      <div className="mb-5 flex justify-center">
+    <div className="min-w-0">
+      <div className="mb-6 flex justify-center">
         <div className="flex rounded-full border border-white/[0.08] bg-white/[0.04] p-1 shadow-lg shadow-black/20">
           {ranges.map((item) => (
             <button
@@ -384,7 +410,7 @@ export function LoadMetricsPanel({ node }: { node: NodeItem }) {
               type="button"
               onClick={() => setRange(item.key)}
               className={[
-                'rounded-full px-4 py-2 text-sm font-medium transition',
+                'rounded-full px-4 py-2 text-sm font-medium transition sm:px-5',
                 range === item.key
                   ? 'bg-white text-black'
                   : 'text-zinc-400 hover:bg-white/[0.05] hover:text-zinc-100',
@@ -396,242 +422,153 @@ export function LoadMetricsPanel({ node }: { node: NodeItem }) {
         </div>
       </div>
 
-      {loading && (
-        <p className="mb-4 text-center text-sm text-zinc-500">{t.loading}</p>
-      )}
+      <div className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-2 2xl:grid-cols-4">
+        <ChartCard
+          title={text.cpu}
+          value={`${latestValue(data, 'cpu').toFixed(2)}%`}
+          data={data}
+          range={range}
+          yFormatter={(value) => `${value.toFixed(0)}`}
+        >
+          <Line
+            type="monotone"
+            dataKey="cpu"
+            name={text.cpu}
+            stroke="#fb7185"
+            strokeWidth={2}
+            dot={false}
+            activeDot={{ r: 3 }}
+            connectNulls
+            isAnimationActive={false}
+          />
+        </ChartCard>
 
-      {error && (
-        <p className="mb-4 text-center text-sm text-red-300">{error}</p>
-      )}
+        <ChartCard
+          title={text.ram}
+          value={`${latestValue(data, 'memory').toFixed(2)}%`}
+          data={data}
+          range={range}
+          yFormatter={(value) => `${value.toFixed(0)}`}
+        >
+          <Line
+            type="monotone"
+            dataKey="memory"
+            name={text.ram}
+            stroke="#fb7185"
+            strokeWidth={2}
+            dot={false}
+            activeDot={{ r: 3 }}
+            connectNulls
+            isAnimationActive={false}
+          />
+        </ChartCard>
 
-      {data.length === 0 && !loading ? (
-        <div className="rounded-2xl border border-white/[0.08] bg-white/[0.045] p-10 text-center text-zinc-500">
-          {t.noData}
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 2xl:grid-cols-4">
-          <MetricCard title="CPU" summary={`${node.cpu.toFixed(2)}%`}>
-            <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
-              <AreaChart data={data}>
-                <CartesianGrid stroke="rgba(255,255,255,0.08)" vertical={false} />
-                <XAxis
-                  dataKey="label"
-                  tick={{ fill: '#71717a', fontSize: 12 }}
-                  axisLine={false}
-                  tickLine={false}
-                  minTickGap={24}
-                />
-                <YAxis
-                  domain={[0, 100]}
-                  tick={{ fill: '#71717a', fontSize: 12 }}
-                  axisLine={false}
-                  tickLine={false}
-                />
-                <Tooltip content={<PercentTooltip />} />
-                <Area
-                  type="monotone"
-                  dataKey="cpu"
-                  name="CPU"
-                  stroke="#fca5a5"
-                  fill="rgba(252,165,165,0.26)"
-                  strokeWidth={2}
-                  dot={false}
-                  connectNulls
-                  isAnimationActive={false}
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          </MetricCard>
+        <ChartCard
+          title={text.disk}
+          value={`${latestValue(data, 'disk').toFixed(2)}%`}
+          data={data}
+          range={range}
+          yFormatter={(value) => `${value.toFixed(0)}`}
+        >
+          <Line
+            type="monotone"
+            dataKey="disk"
+            name={text.disk}
+            stroke="#fb7185"
+            strokeWidth={2}
+            dot={false}
+            activeDot={{ r: 3 }}
+            connectNulls
+            isAnimationActive={false}
+          />
+        </ChartCard>
 
-          <MetricCard title={t.ram} summary={`${node.memory.toFixed(2)}%`}>
-            <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
-              <AreaChart data={data}>
-                <CartesianGrid stroke="rgba(255,255,255,0.08)" vertical={false} />
-                <XAxis
-                  dataKey="label"
-                  tick={{ fill: '#71717a', fontSize: 12 }}
-                  axisLine={false}
-                  tickLine={false}
-                  minTickGap={24}
-                />
-                <YAxis
-                  domain={[0, 100]}
-                  tick={{ fill: '#71717a', fontSize: 12 }}
-                  axisLine={false}
-                  tickLine={false}
-                />
-                <Tooltip content={<PercentTooltip />} />
-                <Area
-                  type="monotone"
-                  dataKey="memory"
-                  name={t.ram}
-                  stroke="#fca5a5"
-                  fill="rgba(252,165,165,0.28)"
-                  strokeWidth={2}
-                  dot={false}
-                  connectNulls
-                  isAnimationActive={false}
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          </MetricCard>
+        <ChartCard
+          title={text.network}
+          value={`↑ ${formatSpeed(latestValue(data, 'uploadSpeed'))}`}
+          subtitle={`↓ ${formatSpeed(latestValue(data, 'downloadSpeed'))}`}
+          data={data}
+          range={range}
+          yFormatter={(value) => formatBytes(value)}
+        >
+          <Line
+            type="monotone"
+            dataKey="uploadSpeed"
+            name={text.upload}
+            stroke="#7dd3fc"
+            strokeWidth={2}
+            dot={false}
+            activeDot={{ r: 3 }}
+            connectNulls
+            isAnimationActive={false}
+          />
 
-          <MetricCard title="Disk" summary={`${node.disk.toFixed(2)}%`}>
-            <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
-              <AreaChart data={data}>
-                <CartesianGrid stroke="rgba(255,255,255,0.08)" vertical={false} />
-                <XAxis
-                  dataKey="label"
-                  tick={{ fill: '#71717a', fontSize: 12 }}
-                  axisLine={false}
-                  tickLine={false}
-                  minTickGap={24}
-                />
-                <YAxis
-                  domain={[0, 100]}
-                  tick={{ fill: '#71717a', fontSize: 12 }}
-                  axisLine={false}
-                  tickLine={false}
-                />
-                <Tooltip content={<PercentTooltip />} />
-                <Area
-                  type="monotone"
-                  dataKey="disk"
-                  name="Disk"
-                  stroke="#fda4af"
-                  fill="rgba(253,164,175,0.28)"
-                  strokeWidth={2}
-                  dot={false}
-                  connectNulls
-                  isAnimationActive={false}
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          </MetricCard>
+          <Line
+            type="monotone"
+            dataKey="downloadSpeed"
+            name={text.download}
+            stroke="#fb7185"
+            strokeWidth={2}
+            dot={false}
+            activeDot={{ r: 3 }}
+            connectNulls
+            isAnimationActive={false}
+          />
+        </ChartCard>
 
-          <MetricCard
-            title={t.network}
-            summary={`↑ ${formatSpeed(latest?.uploadSpeed ?? 0)}`}
-            secondary={`↓ ${formatSpeed(latest?.downloadSpeed ?? 0)}`}
-          >
-            <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
-              <LineChart data={data}>
-                <CartesianGrid stroke="rgba(255,255,255,0.08)" vertical={false} />
-                <XAxis
-                  dataKey="label"
-                  tick={{ fill: '#71717a', fontSize: 12 }}
-                  axisLine={false}
-                  tickLine={false}
-                  minTickGap={24}
-                />
-                <YAxis
-                  tick={{ fill: '#71717a', fontSize: 12 }}
-                  axisLine={false}
-                  tickLine={false}
-                  tickFormatter={(value) => formatBytes(value)}
-                />
-                <Tooltip content={<SpeedTooltip />} />
-                <Line
-                  type="monotone"
-                  dataKey="uploadSpeed"
-                  name="↑"
-                  stroke="#99f6e4"
-                  strokeWidth={2}
-                  dot={false}
-                  connectNulls
-                  isAnimationActive={false}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="downloadSpeed"
-                  name="↓"
-                  stroke="#fca5a5"
-                  strokeWidth={2}
-                  dot={false}
-                  connectNulls
-                  isAnimationActive={false}
-                />
-              </LineChart>
-            </ResponsiveContainer>
-          </MetricCard>
+        <ChartCard
+          title={text.connections}
+          value={`${text.tcp}: ${latestValue(data, 'connections').toFixed(0)}`}
+          subtitle={`${text.udp}: ${latestValue(data, 'udpConnections').toFixed(0)}`}
+          data={data}
+          range={range}
+          yFormatter={(value) => value.toFixed(0)}
+        >
+          <Line
+            type="monotone"
+            dataKey="connections"
+            name={text.tcp}
+            stroke="#fb7185"
+            strokeWidth={2}
+            dot={false}
+            activeDot={{ r: 3 }}
+            connectNulls
+            isAnimationActive={false}
+          />
 
-          <MetricCard
-            title={t.connections}
-            summary={`TCP: ${latest?.connections ?? 0}`}
-            secondary={`UDP: ${latest?.udpConnections ?? 0}`}
-          >
-            <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
-              <LineChart data={data}>
-                <CartesianGrid stroke="rgba(255,255,255,0.08)" vertical={false} />
-                <XAxis
-                  dataKey="label"
-                  tick={{ fill: '#71717a', fontSize: 12 }}
-                  axisLine={false}
-                  tickLine={false}
-                  minTickGap={24}
-                />
-                <YAxis
-                  tick={{ fill: '#71717a', fontSize: 12 }}
-                  axisLine={false}
-                  tickLine={false}
-                />
-                <Tooltip content={<CountTooltip />} />
-                <Line
-                  type="monotone"
-                  dataKey="connections"
-                  name="TCP"
-                  stroke="#fca5a5"
-                  strokeWidth={2}
-                  dot={false}
-                  connectNulls
-                  isAnimationActive={false}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="udpConnections"
-                  name="UDP"
-                  stroke="#99f6e4"
-                  strokeWidth={2}
-                  dot={false}
-                  connectNulls
-                  isAnimationActive={false}
-                />
-              </LineChart>
-            </ResponsiveContainer>
-          </MetricCard>
+          <Line
+            type="monotone"
+            dataKey="udpConnections"
+            name={text.udp}
+            stroke="#7dd3fc"
+            strokeWidth={2}
+            dot={false}
+            activeDot={{ r: 3 }}
+            connectNulls
+            isAnimationActive={false}
+          />
+        </ChartCard>
 
-          <MetricCard title={t.processes} summary={`${latest?.processes ?? 0}`}>
-            <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
-              <LineChart data={data}>
-                <CartesianGrid stroke="rgba(255,255,255,0.08)" vertical={false} />
-                <XAxis
-                  dataKey="label"
-                  tick={{ fill: '#71717a', fontSize: 12 }}
-                  axisLine={false}
-                  tickLine={false}
-                  minTickGap={24}
-                />
-                <YAxis
-                  tick={{ fill: '#71717a', fontSize: 12 }}
-                  axisLine={false}
-                  tickLine={false}
-                />
-                <Tooltip content={<CountTooltip />} />
-                <Line
-                  type="monotone"
-                  dataKey="processes"
-                  name={t.processes}
-                  stroke="#fda4af"
-                  strokeWidth={2}
-                  dot={false}
-                  connectNulls
-                  isAnimationActive={false}
-                />
-              </LineChart>
-            </ResponsiveContainer>
-          </MetricCard>
-        </div>
-      )}
+        <ChartCard
+          title={text.processes}
+          value={`${averageValue(data, 'processes').toFixed(0)}`}
+          data={data}
+          range={range}
+          yFormatter={(value) => value.toFixed(0)}
+        >
+          <Line
+            type="monotone"
+            dataKey="processes"
+            name={text.processes}
+            stroke="#fb7185"
+            strokeWidth={2}
+            dot={false}
+            activeDot={{ r: 3 }}
+            connectNulls
+            isAnimationActive={false}
+          />
+        </ChartCard>
+      </div>
     </div>
   )
 }
