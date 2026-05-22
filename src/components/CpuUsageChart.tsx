@@ -14,6 +14,7 @@ function formatTime(timestamp: number) {
   return new Date(timestamp).toLocaleTimeString([], {
     hour: '2-digit',
     minute: '2-digit',
+    second: '2-digit',
   })
 }
 
@@ -21,16 +22,18 @@ function getChartData(history: NodeMetricSample[] | undefined, currentCpu: numbe
   const source = history ?? []
 
   if (source.length === 0) {
+    const now = Date.now()
+
     return [
       {
-        time: formatTime(Date.now()),
+        timestamp: now,
         value: currentCpu,
       },
     ]
   }
 
-  return source.slice(-160).map((item) => ({
-    time: formatTime(item.timestamp),
+  return source.slice(-180).map((item) => ({
+    timestamp: item.timestamp,
     value: item.cpu,
   }))
 }
@@ -58,18 +61,22 @@ export function CpuUsageChart({ node }: { node: NodeItem }) {
         <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
           <AreaChart data={chartData}>
             <defs>
-              <linearGradient id="cpuGradient" x1="0" y1="0" x2="0" y2="1">
+              <linearGradient id={`cpuGradient-${node.id}`} x1="0" y1="0" x2="0" y2="1">
                 <stop offset="5%" stopColor="#22c55e" stopOpacity={0.5} />
                 <stop offset="95%" stopColor="#22c55e" stopOpacity={0} />
               </linearGradient>
             </defs>
 
             <XAxis
-              dataKey="time"
+              dataKey="timestamp"
+              type="number"
+              scale="time"
+              domain={['dataMin', 'dataMax']}
               axisLine={false}
               tickLine={false}
-              minTickGap={20}
+              minTickGap={32}
               tick={{ fill: '#71717a', fontSize: 12 }}
+              tickFormatter={(value) => formatTime(Number(value))}
             />
 
             <YAxis
@@ -81,22 +88,32 @@ export function CpuUsageChart({ node }: { node: NodeItem }) {
             />
 
             <Tooltip
+              cursor={{
+                stroke: 'rgba(255,255,255,0.35)',
+                strokeWidth: 1,
+              }}
               contentStyle={{
                 background: 'rgba(24,24,27,0.92)',
                 border: '1px solid rgba(255,255,255,0.1)',
                 borderRadius: 16,
                 color: '#fff',
               }}
+              labelFormatter={(value) => formatTime(Number(value))}
               formatter={(value) => [`${Number(value).toFixed(2)}%`, t.cpu]}
             />
 
             <Area
               type="monotone"
               dataKey="value"
+              name={t.cpu}
               stroke="#22c55e"
               strokeWidth={3}
-              fill="url(#cpuGradient)"
+              fill={`url(#cpuGradient-${node.id})`}
               dot={false}
+              activeDot={{
+                r: 4,
+                strokeWidth: 0,
+              }}
               connectNulls
               isAnimationActive={false}
             />
